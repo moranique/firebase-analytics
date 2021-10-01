@@ -1,12 +1,12 @@
+# dist
+# *.map
 .idea/
-dist
 .sourcemaps
 xcuserdata/
 node_modules/
 cli/dist/commands/copy.js
 Pods/
 test_project/
-*.map
 .DS_Store
 Podfile.lock
 example/www/
