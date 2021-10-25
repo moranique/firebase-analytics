@@ -21,6 +21,7 @@ import org.json.JSONObject;
   }
 )
 public class FirebaseAnalytics extends Plugin {
+
   private com.google.firebase.analytics.FirebaseAnalytics mFirebaseAnalytics;
 
   private final String MISSING_REF_MSSG =
@@ -106,24 +107,26 @@ public class FirebaseAnalytics extends Plugin {
       return;
     }
     Task<String> task = mFirebaseAnalytics.getAppInstanceId();
-    task.addOnCompleteListener(new OnCompleteListener<String>() {
+    task.addOnCompleteListener(
+      new OnCompleteListener<String>() {
         @Override
         public void onComplete(@NonNull Task<String> task) {
-            if (task.isSuccessful()) {
-              String instanceId = task.getResult();
-              if (instanceId.isEmpty()) {
-                call.error("failed to obtain app instance id");
-              } else {
-                JSObject result = new JSObject();
-                result.put("instanceId", instanceId);
-                call.success(result);
-              }
+          if (task.isSuccessful()) {
+            String instanceId = task.getResult();
+            if (instanceId.isEmpty()) {
+              call.error("failed to obtain app instance id");
             } else {
-                Exception exception = task.getException();
-                call.error(exception.getLocalizedMessage());
+              JSObject result = new JSObject();
+              result.put("instanceId", instanceId);
+              call.success(result);
             }
+          } else {
+            Exception exception = task.getException();
+            call.error(exception.getLocalizedMessage());
+          }
         }
-    });
+      }
+    );
   }
 
   /**
@@ -151,7 +154,6 @@ public class FirebaseAnalytics extends Plugin {
         .getActivity()
         .runOnUiThread(
           new Runnable() {
-
             @Override
             public void run() {
               Bundle bundle = new Bundle();
@@ -204,45 +206,24 @@ public class FirebaseAnalytics extends Plugin {
   public void logEvent(PluginCall call) {
     try {
       if (mFirebaseAnalytics == null) {
-        call.error(MISSING_REF_MSSG);
+        call.reject(MISSING_REF_MSSG);
         return;
       }
 
       if (!call.hasOption("name")) {
-        call.error("name property is missing");
+        call.reject("name property is missing");
         return;
       }
 
       String name = call.getString("name");
-      JSObject data = call.getData();
-      JSONObject params = data.getJSObject("params");
-      Bundle bundle = new Bundle();
-
-      if (params != null) {
-        Iterator<String> keys = params.keys();
-
-        while (keys.hasNext()) {
-          String key = keys.next();
-          Object value = params.get(key);
-
-          if (value instanceof String) {
-            bundle.putString(key, (String) value);
-          } else if (value instanceof Integer) {
-            bundle.putInt(key, (Integer) value);
-          } else if (value instanceof Double) {
-            bundle.putDouble(key, (Double) value);
-          } else if (value instanceof Long) {
-            bundle.putLong(key, (Long) value);
-          } else {
-            call.reject("value for " + key + " is missing");
-          }
-        }
-      }
-
-      mFirebaseAnalytics.logEvent(name, bundle);
-      call.success();
+      JSONObject params = call.getData().getJSObject("params");
+      mFirebaseAnalytics.logEvent(
+        name,
+        params != null ? FirebaseAnalytics.convertJsonToBundle(params) : null
+      );
+      call.resolve();
     } catch (Exception ex) {
-      call.error(ex.getLocalizedMessage());
+      call.reject(ex.getLocalizedMessage());
     }
   }
 
@@ -312,5 +293,68 @@ public class FirebaseAnalytics extends Plugin {
 
     mFirebaseAnalytics.setSessionTimeoutDuration(duration);
     call.success();
+  }
+
+  public static Bundle convertJsonToBundle(JSONObject json) {
+    Bundle bundle = new Bundle();
+    if (json == null || json.length() == 0) return bundle;
+
+    Iterator<String> iterator = json.keys();
+    while (iterator.hasNext()) {
+      String key = (String) iterator.next();
+      try {
+        Object value = json.get(key);
+        if (value == null); else if (value instanceof String) bundle.putString(
+          key,
+          (String) value
+        ); else if (value instanceof Boolean) bundle.putBoolean(
+          key,
+          (Boolean) value
+        ); else if (value instanceof Integer) bundle.putInt(
+          key,
+          (Integer) value
+        ); else if (value instanceof Long) bundle.putLong(
+          key,
+          (Long) value
+        ); else if (value instanceof Float) bundle.putFloat(
+          key,
+          (Float) value
+        ); else if (value instanceof Double) bundle.putDouble(
+          key,
+          (Double) value
+        ); else if (value instanceof JSONObject) bundle.putBundle(
+          key,
+          FirebaseAnalytics.convertJsonToBundle((JSONObject) value)
+        ); else if (value instanceof JSONArray) {
+          JSONArray array = (JSONArray) value;
+          Object first = array.length() == 0 ? null : (Object) array.get(0);
+          if (first == null); else if (first instanceof JSONObject) {
+            Bundle[] items = new Bundle[array.length()];
+            for (int i = 0; i < array.length(); i++) items[i] =
+              FirebaseAnalytics.convertJsonToBundle(array.getJSONObject(i));
+            bundle.putParcelableArray(key, items);
+          } else if (first instanceof String) {
+            String[] items = new String[array.length()];
+            for (int i = 0; i < array.length(); i++) items[i] =
+              array.getString(i);
+            bundle.putStringArray(key, items);
+          } else if (
+            first instanceof Integer ||
+            first instanceof Float ||
+            first instanceof Double
+          ) {
+            float[] items = new float[array.length()];
+            for (int i = 0; i < array.length(); i++) {
+              items[i] = ((Number) array.get(i)).floatValue();
+            }
+            bundle.putFloatArray(key, items);
+          }
+        }
+      } catch (ClassCastException | JSONException e) {
+        e.printStackTrace();
+      }
+    }
+
+    return bundle;
   }
 }
